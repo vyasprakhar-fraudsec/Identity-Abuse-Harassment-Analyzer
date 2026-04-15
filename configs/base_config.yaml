@@ -1,0 +1,33 @@
+project_name: identity_abuse_harassment_analyzer
+
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  dataset_name: Hate-speech-CNERG/hatexplain
+  random_seed: 42
+  test_size: 0.15
+  val_size: 0.15
+  min_text_len: 3
+  label_mode: three_class   # options: three_class, binary
+
+preprocessing:
+  lowercase: true
+  remove_urls: true
+  remove_extra_whitespace: true
+
+training:
+  max_features: 20000
+  batch_size: 64
+  epochs: 8
+  learning_rate: 0.001
+  hidden_dim: 128
+  dropout: 0.2
+  class_weighting: true
+
+paths:
+  model_path: models/baseline_mlp.pt
+  vectorizer_path: models/tfidf_vectorizer.pkl
+  label_map_path: models/label_map.json
+  metrics_dir: outputs/metrics
+  figures_dir: outputs/figures
+  predictions_dir: outputs/predictions

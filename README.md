@@ -3,6 +3,7 @@
   <p><b>Applied ML for Trust & Safety — detecting hate speech and identity-based harassment using the HateXplain benchmark.</b></p>
 </div>
 
+[![Code Quality](https://github.com/vyasprakhar-fraudsec/Identity-Abuse-Harassment-Analyzer/actions/workflows/lint.yml/badge.svg)](https://github.com/vyasprakhar-fraudsec/Identity-Abuse-Harassment-Analyzer/actions/workflows/lint.yml)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat&logo=python)](https://python.org)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-orange?style=flat&logo=pytorch)](https://pytorch.org)
 [![scikit-learn](https://img.shields.io/badge/scikit--learn-1.3+-green?style=flat&logo=scikitlearn)](https://scikit-learn.org)
@@ -37,19 +38,26 @@ This makes it ideal for building moderation systems that are not only accurate b
 
 ```
 Identity-Abuse-Harassment-Analyzer/
+├── .github/workflows/
+│   └── lint.yml                # CI: flake8, black, isort, dependency checks
 ├── configs/
-│   └── base_config.yaml        # All hyperparameters and paths in one place
+│   ├── base_config.yaml        # Baseline hyperparameters
+│   └── tuned_config.yaml       # Tuned v2 (dropout=0.1, class weighting)
+├── docs/
+│   └── ARCHITECTURE.md         # Deep-dive: design decisions, model rationale
 ├── reports/
-│   └── RESULTS.md              # Full evaluation report: metrics, confusion, subgroup analysis
+│   └── RESULTS.md              # Full evaluation: metrics, confusion, subgroup F1
 ├── src/
-│   ├── download_hatexplain.py  # Downloads dataset via HuggingFace datasets
-│   ├── inspect_hatexplain.py   # EDA: label distribution, target groups, text stats
-│   ├── preprocess.py           # Cleans text, builds train/val/test CSVs
-│   ├── label_maps.py           # Label encoding utilities
+│   ├── download_hatexplain.py  # Downloads dataset via HuggingFace
+│   ├── inspect_hatexplain.py   # EDA: label distribution, target groups
+│   ├── preprocess.py           # Majority voting, stratified splits, text cleaning
+│   ├── label_maps.py           # Label encoding (3-class and binary modes)
 │   ├── train_baseline.py       # TF-IDF + MLP training with class weighting
 │   ├── evaluate.py             # Classification report, confusion matrix, subgroup F1
-│   └── utils.py                # Config loading, seed setting, dir management
+│   └── utils.py                # Config loading, seed setting, text cleaning
+├── CONTRIBUTING.md
 ├── LICENSE
+├── Makefile
 ├── requirements.txt
 └── README.md
 ```
@@ -70,9 +78,9 @@ Input text
   → CrossEntropyLoss with class weights
 ```
 
-- **Why TF-IDF + MLP first?** Establishes an interpretable, fast-to-train baseline before moving to transformer fine-tuning. A strong baseline is a signal of good ML practice.
-- **Class weighting**: Handles the hate/offensive/normal imbalance in HateXplain.
-- **Config-driven**: All hyperparameters live in `configs/base_config.yaml` — reproducible and easy to sweep.
+- **Why TF-IDF + MLP first?** Fast, interpretable baseline before transformers. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for full design rationale.
+- **Class weighting**: Handles hate/offensive/normal imbalance. Critical for safety-relevant hate recall.
+- **Config-driven**: All hyperparameters in `configs/` — reproducible, diffable experiments.
 
 ---
 
@@ -82,8 +90,8 @@ Input text
 
 | Variant | Macro F1 | Hate F1 | Notes |
 |---------|----------|---------|-------|
-| Baseline | 0.6254 | 0.59 | dropout=0.0, no class weighting |
-| Tuned v2 | **0.6267** | **0.62** | dropout=0.1, class weighting enabled |
+| Baseline | 0.6254 | 0.59 | `configs/base_config.yaml` |
+| Tuned v2 | **0.6267** | **0.62** | `configs/tuned_config.yaml` — dropout=0.1, class weighting |
 
 **Key win**: Class weighting lifted hate recall by ~3pp — the most safety-critical class to get right.
 
@@ -96,7 +104,7 @@ Actual off.:    87       641         163
 Actual normal:  52       108         214
 ```
 
-Dominant error: **hate ↔ offensive** misclassification (expected — lexical overlap is high for bag-of-words features). Hate ↔ normal confusion is low (49 cases), which matters most for safety.
+Dominant error: **hate ↔ offensive** misclassification (expected — lexical overlap is high for bag-of-words). Hate ↔ normal confusion is low (49 cases), which matters most for safety.
 
 ### Subgroup Fairness (Macro F1 by target identity)
 
@@ -120,33 +128,50 @@ Dominant error: **hate ↔ offensive** misclassification (expected — lexical o
 ## Quickstart
 
 ```bash
-# 1. Clone and install
+# Clone and install
 git clone https://github.com/vyasprakhar-fraudsec/Identity-Abuse-Harassment-Analyzer
 cd Identity-Abuse-Harassment-Analyzer
-pip install -r requirements.txt
+make setup
 
-# 2. Download and preprocess data
-python src/download_hatexplain.py
-python src/preprocess.py --config configs/base_config.yaml
+# Run full baseline pipeline
+make all
 
-# 3. Train
-python src/train_baseline.py --config configs/base_config.yaml
+# Or run steps individually
+make download      # Fetch HateXplain from HuggingFace
+make preprocess    # Clean and split data
+make train         # Train baseline model
+make evaluate      # Generate confusion matrix, subgroup F1, predictions
 
-# 4. Evaluate (generates confusion matrix, subgroup report, predictions)
-python src/evaluate.py --config configs/base_config.yaml
+# Train and evaluate tuned model
+make train-tuned
+make evaluate-tuned
+
+# Code quality
+make lint          # flake8
+make format        # black + isort
 ```
 
-All outputs are written to `outputs/` (metrics CSVs, confusion matrix PNG, predictions CSV).
+See [`Makefile`](Makefile) for all available targets. All outputs are written to `outputs/`.
+
+---
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Pipeline design, model choices, evaluation rationale |
+| [`reports/RESULTS.md`](reports/RESULTS.md) | Full metrics, confusion matrix, subgroup fairness table, error analysis |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute, code standards, responsible AI guidelines |
 
 ---
 
 ## Limitations
 
-- **Ceiling on TF-IDF features**: Bag-of-words representations miss context, sarcasm, and dog-whistle language. Transformer fine-tuning is the clear next step.
+- **Ceiling on TF-IDF features**: Misses context, sarcasm, and dog-whistle language. Transformer fine-tuning is the clear next step.
 - **English-only**: HateXplain is English-centric; cross-lingual generalization is untested.
 - **Static dataset**: No online learning or drift detection. Real-world abuse patterns evolve rapidly.
-- **Subgroup data sparsity**: Groups with <20 test examples are excluded from subgroup analysis — some minority communities may be underrepresented.
-- **No adversarial robustness**: The model is not tested against deliberate obfuscation (e.g., leetspeak, spacing tricks).
+- **Subgroup data sparsity**: Groups with <20 test examples are excluded from subgroup analysis.
+- **No adversarial robustness**: Not tested against obfuscation (e.g., leetspeak, spacing tricks).
 
 ---
 
@@ -171,6 +196,7 @@ All outputs are written to `outputs/` (metrics CSVs, confusion matrix PNG, predi
 | Data | HuggingFace `datasets` |
 | Visualization | matplotlib, seaborn |
 | Config management | PyYAML |
+| CI | GitHub Actions (flake8, black, isort) |
 | Reproducibility | Fixed seed (42), config-driven |
 
 ---

@@ -1,0 +1,40 @@
+# Tuned v2 configuration
+# Changes from base_config.yaml:
+#   - dropout: 0.0 -> 0.1          (regularization)
+#   - class_weighting: false -> true (handles hate/normal underrepresentation)
+# Result: macro F1 0.6254 -> 0.6267 (+0.13pp)
+# Key finding: hate recall improved ~3pp - most safety-critical gain
+
+project_name: identity_abuse_harassment_analyzer_tuned
+
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  dataset_name: Hate-speech-CNERG/hatexplain
+  random_seed: 42
+  test_size: 0.15
+  val_size: 0.15
+  min_text_len: 3
+  label_mode: three_class  # options: three_class, binary
+
+preprocessing:
+  lowercase: true
+  remove_urls: true
+  remove_extra_whitespace: true
+
+training:
+  max_features: 30000
+  batch_size: 64
+  epochs: 12
+  learning_rate: 0.001
+  hidden_dim: 256
+  dropout: 0.1           # increased from 0.0 in base_config
+  class_weighting: true  # enabled: upweights hate + normal classes
+
+paths:
+  model_path: models/tuned_mlp.pt
+  vectorizer_path: models/tfidf_vectorizer_tuned.pkl
+  label_map_path: models/label_map.json
+  metrics_dir: outputs/metrics/tuned
+  figures_dir: outputs/figures/tuned
+  predictions_dir: outputs/predictions/tuned

@@ -1,59 +1,174 @@
 <div align="center">
-<img src="https://github.com/vyasprakhar-fraudsec/Identity-Abuse-Harassment-Analyzer/raw/main/results/demo_prediction.png" alt="Demo" width="700"/>
-<h1>🛡️ Identity Abuse & Targeted Harassment Analyzer</h1>
+  <h1>🛡️ Identity Abuse & Targeted Harassment Analyzer</h1>
+  <p><b>Applied ML for Trust & Safety — detecting hate speech and identity-based harassment using the HateXplain benchmark.</b></p>
 </div>
 
-**ML-powered detector for hate speech targeting identities (race, religion, LGBTQ+ etc.) using HateXplain benchmark.** Focus: Trust & Safety, bias analysis, explainability. [Live HF Space](https://huggingface.co/spaces/your-username/analyzer)[web:1]
-
-[![Tuned Macro-F1](https://img.shields.io/badge/Tuned%20F1-0.78-brightgreen?style=flat&logo=sklearn)](results/metrics.md)
-[![Baseline F1](https://img.shields.io/badge/Baseline%20F1-0.72-orange?style=flat&logo=pytorch)](results/metrics.md)
-[![Subgroup Fairness](https://img.shields.io/badge/Avg%20Subgroup%20F1-0.72-blue?style=flat)](results/subgroup.md)
-
-## Why This Matters
-- **Problem**: Targeted harassment evades generic detectors; HateXplain adds targets/rationales for nuanced analysis.[web:2]
-- **Your Contribution**: Baseline + tuned models (+6% F1), subgroup bias audit—ready for moderation APIs.
-
-## Tech Stack & Workflow
-- **Data**: HateXplain (20k posts, hate/offensive/normal + 10 targets).[web:1][web:53]
-- **Models**: BERT baseline → Tuned (focal loss, rationale attention).
-- **Eval**: F1-macro, confusion, per-target F1 (e.g., Islam:0.80, Asian:0.70).
-
-```mermaid
-graph LR
-  A[Raw HateXplain] --> B[EDA Notebook]
-  B --> C[Train Baseline/Tuned]
-  C --> D[Eval + Subgroup]
-  D --> E[Predictions API]
-```
-
-## Key Results
-| Variant     | Macro F1 | Hate F1 | Subgroup F1 (Avg) | Bias Δ |
-|-------------|----------|---------|-------------------|--------|
-| Baseline   | 0.72    | 0.68   | 0.65             | -     |
-| Tuned      | **0.78**| **0.75**| **0.72**         | +7%   |
-
-![Confusion](results/confusion_matrix_tuned.png)
-![Targets](results/target_f1_heatmap.png)
-
-Full tables/logs: [metrics.md](results/metrics.md)
-
-## Quick Demo
-```bash
-pip install -r requirements.txt
-python src/inference.py "You dirty [targeted group]"  # → {'hate':0.92, 'target':'religion'}
-```
-
-## Limitations & Ethics
-- Dataset English/ static; real-world drift expected.
-- Bias: Lower F1 for minorities (mitigated 5% via weighting).[web:53]
-- No adversarial robustness yet.
-
-## Future Work
-- Gradio UI + Docker deploy.
-- Multilingual (XLM-R) + live streaming.
-- Integrate SHAP for rationales viz.
-
-**Prakhar Vyas** | [Portfolio](https://vyasprakhar.com) | Open to ML Engineer roles in AI Safety 🚀
+[![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat&logo=python)](https://python.org)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-orange?style=flat&logo=pytorch)](https://pytorch.org)
+[![scikit-learn](https://img.shields.io/badge/scikit--learn-1.3+-green?style=flat&logo=scikitlearn)](https://scikit-learn.org)
+[![HateXplain](https://img.shields.io/badge/Dataset-HateXplain-purple?style=flat)](https://huggingface.co/datasets/Hate-speech-CNERG/hatexplain)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat)](LICENSE)
 
 ---
-[Dataset](https://huggingface.co/datasets/Hate-speech-CNERG/hatexplain) | [Paper](https://arxiv.org/abs/2012.10289)[web:2] | MIT License
+
+## Overview
+
+This project builds a text classifier to detect **hate speech**, **offensive content**, and **normal speech** on social media, with a focus on **identity-targeted abuse** (e.g., posts targeting race, religion, gender, or sexual orientation).
+
+It uses the [HateXplain dataset](https://huggingface.co/datasets/Hate-speech-CNERG/hatexplain) — a benchmark specifically designed for explainable hate speech detection — and trains a **TF-IDF + MLP baseline** with class-weighted loss to handle label imbalance. Subgroup fairness analysis is included to surface per-identity performance gaps.
+
+This is a portfolio project focused on **Trust & Safety**, **applied NLP**, and **responsible AI evaluation**.
+
+---
+
+## Why This Matters
+
+Platforms moderating user-generated content face a hard problem: generic toxicity classifiers miss **targeted identity-based abuse** that is contextually harmful but linguistically subtle. HateXplain provides:
+
+- **3-class labels**: hate / offensive / normal
+- **Target group annotations**: which identity group is being attacked
+- **Human rationales**: which tokens justify the label
+
+This makes it ideal for building moderation systems that are not only accurate but **auditable and bias-aware**.
+
+---
+
+## Project Structure
+
+```
+Identity-Abuse-Harassment-Analyzer/
+├── configs/
+│   └── base_config.yaml        # All hyperparameters and paths in one place
+├── reports/                    # Output directory for metrics, figures, predictions
+├── src/
+│   ├── download_hatexplain.py  # Downloads dataset via HuggingFace datasets
+│   ├── inspect_hatexplain.py   # EDA: label distribution, target groups, text stats
+│   ├── preprocess.py           # Cleans text, builds train/val/test CSVs
+│   ├── label_maps.py           # Label encoding utilities
+│   ├── train_baseline.py       # TF-IDF + MLP training with class weighting
+│   ├── evaluate.py             # Classification report, confusion matrix, subgroup F1
+│   └── utils.py                # Config loading, seed setting, dir management
+├── requirements.txt
+└── README.md
+```
+
+---
+
+## Model Architecture
+
+**Baseline: TF-IDF → MLP Classifier**
+
+```
+Input text
+  → TF-IDF Vectorizer (max_features=30,000, unigrams + bigrams)
+  → Linear(30000 → 256)
+  → ReLU
+  → Dropout(0.1)
+  → Linear(256 → 3)
+  → CrossEntropyLoss with class weights
+```
+
+- **Why TF-IDF + MLP first?** Establishes an interpretable, fast-to-train baseline before moving to transformer fine-tuning. A strong baseline is a signal of good ML practice.
+- **Class weighting**: Handles the hate/offensive/normal imbalance in HateXplain.
+- **Config-driven**: All hyperparameters live in `configs/base_config.yaml` — reproducible and easy to sweep.
+
+---
+
+## Key Results
+
+> Metrics are reported on the held-out test set (15% split, seed=42).
+
+| Variant | Macro F1 | Notes |
+|---------|----------|-------|
+| Baseline | 0.6254 | Default config, dropout=0.0 |
+| Tuned v2 | **0.6267** | dropout=0.1, class weighting |
+
+**Evaluation outputs** (generated by `src/evaluate.py`):
+- Per-class precision / recall / F1 (`outputs/metrics/classification_report.csv`)
+- Confusion matrix heatmap (`outputs/figures/confusion_matrix.png`)
+- Subgroup fairness table by `target_group` (`outputs/metrics/subgroup_metrics.csv`)
+- Full test predictions with predicted labels (`outputs/predictions/test_predictions.csv`)
+
+> Note: The macro F1 gap between baseline and tuned is intentionally small — this is honest. Hate speech classification on HateXplain is a genuinely hard 3-class problem, and TF-IDF features have a ceiling. The value here is in the **evaluation pipeline and subgroup analysis**, not raw score maximization.
+
+---
+
+## Subgroup Fairness Analysis
+
+The evaluator computes per-identity-group macro F1 for any group with ≥20 test examples. This surfaces **where the model underperforms for specific communities** — a critical step for responsible deployment in any Trust & Safety context.
+
+Identity groups covered in HateXplain include: African, Arab, Asian, Caucasian, Christian, Hindu, Hispanic, Indigenous, Jewish, LGBTQ+, Muslim, Women, and others.
+
+---
+
+## Quickstart
+
+```bash
+# 1. Clone and install
+git clone https://github.com/vyasprakhar-fraudsec/Identity-Abuse-Harassment-Analyzer
+cd Identity-Abuse-Harassment-Analyzer
+pip install -r requirements.txt
+
+# 2. Download and preprocess data
+python src/download_hatexplain.py
+python src/preprocess.py --config configs/base_config.yaml
+
+# 3. Train
+python src/train_baseline.py --config configs/base_config.yaml
+
+# 4. Evaluate (generates confusion matrix, subgroup report, predictions)
+python src/evaluate.py --config configs/base_config.yaml
+```
+
+---
+
+## Limitations
+
+- **Ceiling on TF-IDF features**: Bag-of-words representations miss context, sarcasm, and dog-whistle language. Transformer fine-tuning is the clear next step.
+- **English-only**: HateXplain is English-centric; cross-lingual generalization is untested.
+- **Static dataset**: No online learning or drift detection. Real-world abuse patterns evolve rapidly.
+- **Subgroup data sparsity**: Groups with <20 test examples are excluded from subgroup analysis — some minority communities may be underrepresented.
+- **No adversarial robustness**: The model is not tested against deliberate obfuscation (e.g., leetspeak, spacing tricks).
+
+---
+
+## Next Steps
+
+- [ ] Fine-tune `bert-base-uncased` or `roberta-base` on HateXplain for a meaningful F1 lift
+- [ ] Add SHAP token-level explanations to visualize what drives predictions
+- [ ] Build a Gradio demo for interactive inference
+- [ ] Benchmark against Perspective API on the same test split
+- [ ] Experiment with focal loss to further address class imbalance
+- [ ] Explore multilingual extension with `xlm-roberta-base`
+
+---
+
+## Tech Stack
+
+| Component | Tool |
+|-----------|------|
+| Language | Python 3.10+ |
+| ML framework | PyTorch 2.0+ |
+| Feature extraction | scikit-learn TfidfVectorizer |
+| Data | HuggingFace `datasets` |
+| Visualization | matplotlib, seaborn |
+| Config management | PyYAML |
+| Reproducibility | Fixed seed (42), config-driven |
+
+---
+
+## Dataset
+
+**HateXplain** — Mathew et al., AAAI 2021
+- ~20,000 posts from Twitter and Gab
+- 3-class labels (hate / offensive / normal)
+- Target group annotations (10+ identity categories)
+- Human rationale spans for explainability
+
+[HuggingFace Dataset](https://huggingface.co/datasets/Hate-speech-CNERG/hatexplain) | [Paper (arXiv)](https://arxiv.org/abs/2012.10289)
+
+---
+
+**Prakhar Vyas** | Aspiring ML Engineer — Trust & Safety / Applied NLP
+
+*Built with PyTorch · Licensed MIT*

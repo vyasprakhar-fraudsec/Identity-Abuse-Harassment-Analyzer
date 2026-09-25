@@ -1,0 +1,18 @@
+# Fine-tuned transformer. Needs a GPU (free Colab T4: ~10 min for 3 epochs).
+experiment: distilroberta
+seed: 42
+data_config: configs/data.yaml
+
+model:
+  type: transformer
+  pretrained_name: distilroberta-base
+  max_length: 128
+  batch_size: 32
+  epochs: 3
+  learning_rate: 2.0e-5
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  class_weighting: true
+
+eval:
+  min_group_size: 30

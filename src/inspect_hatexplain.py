@@ -1,48 +1,26 @@
-from datasets import load_dataset
-from collections import Counter
-import json
+"""Quick EDA on the processed splits: label balance and target-group coverage."""
 
-ds = load_dataset(
-    "Hate-speech-CNERG/hatexplain",
-    trust_remote_code=True
-)
+import argparse
+from pathlib import Path
 
-print("=== DATASET SHAPE ===")
-for split in ds:
-    print(f"{split}: {len(ds[split])}")
+import pandas as pd
 
-print("\n=== SAMPLE EXAMPLE ===")
-sample = ds["train"][0]
-print(json.dumps(sample, indent=2)[:2000])
+from utils import load_config
 
-label_counter = Counter()
-target_counter = Counter()
 
-for i in range(min(1000, len(ds["train"]))):
-    example = ds["train"][i]
-    ann = example["annotators"]
+def main(config_path):
+    config = load_config(config_path)
+    processed = Path(config["data"]["processed_dir"])
+    for split in ["train", "val", "test"]:
+        df = pd.read_csv(processed / f"{split}.csv", keep_default_na=False)
+        print(f"\n=== {split} ({len(df)} posts) ===")
+        print(df["label_text"].value_counts(normalize=True).round(3).to_string())
+        groups = df["target_groups"].str.split("|").explode()
+        print("top target groups:")
+        print(groups[groups != ""].value_counts().head(12).to_string())
 
-    labels = ann["label"]          # list of ints
-    targets = ann["target"]        # list of list[str]
 
-    for j, lbl in enumerate(labels):
-        label_counter[lbl] += 1
-
-        for tgt in targets[j]:
-            if tgt:
-                target_counter[tgt] += 1
-
-print("\n=== LABEL COUNTS (annotator-level, first 1000 train examples) ===")
-print(label_counter)
-
-print("\n=== TOP TARGET GROUPS (annotator-level, first 1000 train examples) ===")
-for target, count in target_counter.most_common(20):
-    print(f"{target}: {count}")
-    
-for i in range(5):
-    ex = ds["train"][i]
-    text = " ".join(ex["post_tokens"])
-    print("TEXT:", text)
-    print("LABELS:", ex["annotators"]["label"])
-    print("TARGET:", ex["annotators"]["target"])
-    print("---")
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default="configs/data.yaml")
+    main(parser.parse_args().config)

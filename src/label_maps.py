@@ -1,14 +1,8 @@
-LABEL_TO_ID_3CLASS = {
-    "normal": 0,
-    "offensive": 1,
-    "hatespeech": 2,
-}
+"""Label encoding. The order here is the order used everywhere (probabilities, reports)."""
 
-ID_TO_LABEL_3CLASS = {v: k for k, v in LABEL_TO_ID_3CLASS.items()}
+LABELS = ["normal", "offensive", "hatespeech"]
+LABEL_TO_ID = {label: i for i, label in enumerate(LABELS)}
+ID_TO_LABEL = {i: label for label, i in LABEL_TO_ID.items()}
 
-LABEL_TO_ID_BINARY = {
-    "non_abusive": 0,
-    "abusive": 1,
-}
-
-ID_TO_LABEL_BINARY = {v: k for k, v in LABEL_TO_ID_BINARY.items()}
+# "Abusive" = offensive or hate speech. Used for fairness metrics.
+ABUSIVE_IDS = {LABEL_TO_ID["offensive"], LABEL_TO_ID["hatespeech"]}

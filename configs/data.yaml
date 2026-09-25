@@ -1,0 +1,10 @@
+# Shared data settings, used by download/preprocess and read by every experiment.
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+
+preprocessing:
+  lowercase: false          # TF-IDF lowercases itself; transformers get the original casing
+  remove_urls: true
+  remove_extra_whitespace: true
+  min_tokens: 3

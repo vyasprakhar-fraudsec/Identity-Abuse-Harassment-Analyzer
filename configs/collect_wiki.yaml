@@ -1,0 +1,21 @@
+# Out-of-distribution evaluation set from English Wikipedia talk pages.
+# See docs/DATASHEET_wiki_talk.md for the ethics and licensing notes.
+api_url: https://en.wikipedia.org/w/api.php
+# Wikimedia asks every client to identify itself with a contact point.
+user_agent: "IdentityAbuseAnalyzer/1.0 (research portfolio project; https://github.com/vyasprakhar-fraudsec/Identity-Abuse-Harassment-Analyzer)"
+namespaces: [1, 3]            # 1 = article talk, 3 = user talk
+max_revisions: 1500           # diffs to fetch; ~25 min at 1 request/second
+request_interval_seconds: 1.0 # one request at a time, never in parallel
+maxlag: 5                     # back off when Wikipedia's servers are busy
+min_chars: 30
+max_chars: 1500
+
+raw_path: data/external/wiki_talk_raw.jsonl       # text, local only (gitignored)
+to_label_path: data/external/wiki_talk_to_label.csv  # text, local only (gitignored)
+labels_dir: data/external/labels                  # rev ids + labels only, committed
+
+sample:
+  n: 500
+  model_flagged_fraction: 0.5   # half from the posts the baseline scores as most abusive
+  scorer_config: configs/tfidf_logreg.yaml
+  seed: 42

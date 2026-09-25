@@ -21,5 +21,5 @@ judged without context you don't have.
 ## Agreement check
 A second person labels the first 150 items without seeing your labels
 (`python src/label_wiki.py --annotator <name> --limit 150`). `evaluate_ood.py`
-reports Cohen's kappa. Around 0.4–0.6 is typical for this task; HateXplain's own
-annotators reached about 0.46.
+reports Cohen's kappa. Around 0.4–0.6 is typical for this task; HateXplain reports
+Krippendorff's alpha of 0.46 for its annotators.

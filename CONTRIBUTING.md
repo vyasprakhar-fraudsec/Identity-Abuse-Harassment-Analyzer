@@ -39,7 +39,7 @@ cd Identity-Abuse-Harassment-Analyzer
 make setup
 
 # 3. Run the full pipeline to verify everything works
-make all
+make data && make baseline
 
 # 4. Run lint before submitting
 make lint
@@ -61,7 +61,7 @@ make lint
 
 If your contribution changes a hyperparameter or training behaviour:
 - Add a new YAML file to `configs/` rather than modifying an existing one.
-- Name it descriptively: `bert_config.yaml`, `focal_loss_config.yaml`, etc.
+- Name it after the experiment (e.g. `roberta_focal.yaml`) and set `experiment:` to the same name.
 - Add a comment header explaining what changed and why.
 
 This keeps experiments reproducible and auditable.

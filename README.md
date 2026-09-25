@@ -1,218 +1,119 @@
 <div align="center">
   <h1>🛡️ Identity Abuse & Targeted Harassment Analyzer</h1>
-  <p><b>Applied ML for Trust & Safety — detecting hate speech and identity-based harassment using the HateXplain benchmark.</b></p>
+  <p><b>Detecting hate speech and identity-targeted abuse, measuring who the model fails, and testing it on fresh data it has never seen.</b></p>
+
+[![CI](https://github.com/vyasprakhar-fraudsec/Identity-Abuse-Harassment-Analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/vyasprakhar-fraudsec/Identity-Abuse-Harassment-Analyzer/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python)](https://python.org)
+[![Dataset](https://img.shields.io/badge/Dataset-HateXplain-purple)](https://github.com/hate-alert/HateXplain)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 </div>
 
-[![Code Quality](https://github.com/vyasprakhar-fraudsec/Identity-Abuse-Harassment-Analyzer/actions/workflows/lint.yml/badge.svg)](https://github.com/vyasprakhar-fraudsec/Identity-Abuse-Harassment-Analyzer/actions/workflows/lint.yml)
-[![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat&logo=python)](https://python.org)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-orange?style=flat&logo=pytorch)](https://pytorch.org)
-[![scikit-learn](https://img.shields.io/badge/scikit--learn-1.3+-green?style=flat&logo=scikitlearn)](https://scikit-learn.org)
-[![HateXplain](https://img.shields.io/badge/Dataset-HateXplain-purple?style=flat)](https://huggingface.co/datasets/Hate-speech-CNERG/hatexplain)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat)](LICENSE)
-
 ---
 
-## Overview
+## What this project does
 
-This project builds a text classifier to detect **hate speech**, **offensive content**, and **normal speech** on social media, with a focus on **identity-targeted abuse** (e.g., posts targeting race, religion, gender, or sexual orientation).
+Content moderation models are usually judged by one accuracy number. This project asks three harder questions:
 
-It uses the [HateXplain dataset](https://huggingface.co/datasets/Hate-speech-CNERG/hatexplain) — a benchmark specifically designed for explainable hate speech detection — and trains a **TF-IDF + MLP baseline** with class-weighted loss to handle label imbalance. Subgroup fairness analysis is included to surface per-identity performance gaps.
+1. **How well can we separate hate speech, offensive language and normal speech?** From a TF-IDF baseline up to a fine-tuned transformer, on the official HateXplain split.
+2. **Who does the model fail?** Error rates per targeted identity group, including how often *harmless* posts that mention a group get flagged.
+3. **Does it hold up on new data?** A small, ethically collected, hand-labelled set of recent Wikipedia talk-page comments, a different platform and a different year from the training data.
 
-This is a portfolio project focused on **Trust & Safety**, **applied NLP**, and **responsible AI evaluation**.
+## Results
 
----
+<!-- RESULTS:START -->
 
-## Why This Matters
+| Model | Macro F1 | Accuracy | Normal F1 | Offensive F1 | Hate F1 |
+|---|---|---|---|---|---|
+| TF-IDF + Logistic Regression | **0.648** | 0.659 | 0.711 | 0.509 | 0.724 |
 
-Platforms moderating user-generated content face a hard problem: generic toxicity classifiers miss **targeted identity-based abuse** that is contextually harmful but linguistically subtle. HateXplain provides:
+_Not run yet: TF-IDF + MLP (untuned), TF-IDF + MLP (dropout 0.3, class weights), DistilRoBERTa (fine-tuned), Wikipedia evaluation. See `notebooks/run_pipeline.ipynb`._
 
-- **3-class labels**: hate / offensive / normal
-- **Target group annotations**: which identity group is being attacked
-- **Human rationales**: which tokens justify the label
+- Best model on the HateXplain test set: **TF-IDF + Logistic Regression**, macro F1 0.648.
+- Biggest confusion: 96 hate-speech posts predicted as offensive and 107 offensive posts predicted as hate speech.
+- Among groups with at least 50 test posts, macro F1 ranges from 0.452 (Refugee) to 0.565 (Women).
+- Highest false-flag rate: 77% of normal posts about the **Jewish** group were flagged as abusive (only 13 such posts, so treat as indicative). This is identity-term bias: the model learns the group name itself as a signal of abuse.
 
-This makes it ideal for building moderation systems that are not only accurate but **auditable and bias-aware**.
+Full report: [`reports/RESULTS.md`](reports/RESULTS.md)
 
----
+<!-- RESULTS:END -->
 
-## Project Structure
-
-```
-Identity-Abuse-Harassment-Analyzer/
-├── .github/workflows/
-│   └── lint.yml                # CI: flake8, black, isort, dependency checks
-├── configs/
-│   ├── base_config.yaml        # Baseline hyperparameters
-│   └── tuned_config.yaml       # Tuned v2 (dropout=0.1, class weighting)
-├── docs/
-│   └── ARCHITECTURE.md         # Deep-dive: design decisions, model rationale
-├── reports/
-│   └── RESULTS.md              # Full evaluation: metrics, confusion, subgroup F1
-├── src/
-│   ├── download_hatexplain.py  # Downloads dataset via HuggingFace
-│   ├── inspect_hatexplain.py   # EDA: label distribution, target groups
-│   ├── preprocess.py           # Majority voting, stratified splits, text cleaning
-│   ├── label_maps.py           # Label encoding (3-class and binary modes)
-│   ├── train_baseline.py       # TF-IDF + MLP training with class weighting
-│   ├── evaluate.py             # Classification report, confusion matrix, subgroup F1
-│   └── utils.py                # Config loading, seed setting, text cleaning
-├── CONTRIBUTING.md
-├── LICENSE
-├── Makefile
-├── requirements.txt
-└── README.md
-```
-
----
-
-## Model Architecture
-
-**Baseline: TF-IDF → MLP Classifier**
+## How it works
 
 ```
-Input text
-  → TF-IDF Vectorizer (max_features=30,000, unigrams + bigrams)
-  → Linear(30000 → 256)
-  → ReLU
-  → Dropout(0.1)
-  → Linear(256 → 3)
-  → CrossEntropyLoss with class weights
+HateXplain (pinned release, official split)
+  → preprocess: majority-vote labels, majority target groups
+  → models: TF-IDF + LogReg │ TF-IDF + MLP │ DistilRoBERTa (fine-tuned)
+  → evaluate: per-class metrics, confusion matrix, per-group fairness metrics
+  → Wikipedia talk pages (MediaWiki API) → stratified sample → hand labels → out-of-distribution scores
+  → make_report: every number in this README is generated from those outputs
 ```
 
-- **Why TF-IDF + MLP first?** Fast, interpretable baseline before transformers. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for full design rationale.
-- **Class weighting**: Handles hate/offensive/normal imbalance. Critical for safety-relevant hate recall.
-- **Config-driven**: All hyperparameters in `configs/` — reproducible, diffable experiments.
+- **Labels:** majority vote of 3 annotators; posts where all 3 disagree are dropped (as in the paper).
+- **Fairness metrics:** a post counts towards every group that ≥2 annotators said it targets. Besides F1, the report tracks *hate recall* (missed attacks) and the *false-flag rate on normal posts* (over-moderation of a group).
+- **Explainability:** the demo highlights each word's exact contribution for the linear model.
 
----
+Design decisions and trade-offs: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-## Key Results
+## The fresh-data module
 
-> Metrics reported on held-out test set (15% split, seed=42). Full report: [`reports/RESULTS.md`](reports/RESULTS.md)
+`src/collect_wiki.py` builds an evaluation set from English Wikipedia talk pages, collected responsibly:
 
-| Variant | Macro F1 | Hate F1 | Notes |
-|---------|----------|---------|-------|
-| Baseline | 0.6254 | 0.59 | `configs/base_config.yaml` |
-| Tuned v2 | **0.6267** | **0.62** | `configs/tuned_config.yaml` — dropout=0.1, class weighting |
+- **Official MediaWiki API only**, never page scraping. Descriptive User-Agent, one request per second, `maxlag` and back-off, as Wikimedia's API etiquette requires.
+- **No personal data**: usernames and page titles are never requested; mentions, signatures, IPs and emails become `<user>`.
+- **Only revision ids and labels are committed.** Text is re-fetched locally (`rehydrate`), so anything Wikipedia later deletes disappears here too. Content is CC BY-SA 4.0.
+- **Stratified sampling** (half model-flagged, half random), with results reported per stratum, plus Cohen's kappa against a second annotator.
 
-**Key win**: Class weighting lifted hate recall by ~3pp — the most safety-critical class to get right.
-
-### Confusion Matrix Summary (Tuned v2)
-
-```
-Predicted →   hate    offensive    normal
-Actual hate:   251       112          49
-Actual off.:    87       641         163
-Actual normal:  52       108         214
-```
-
-Dominant error: **hate ↔ offensive** misclassification (expected — lexical overlap is high for bag-of-words). Hate ↔ normal confusion is low (49 cases), which matters most for safety.
-
-### Subgroup Fairness (Macro F1 by target identity)
-
-| Target Group | Macro F1 | Trend |
-|---|---|---|
-| African | 0.71 | Best represented in training |
-| Muslim | 0.68 | Strong lexical signal |
-| Jewish | 0.66 | Moderate |
-| Women | 0.65 | Gender-based hate harder to detect |
-| LGBTQ+ | 0.61 | Contextual/reclaimed language hurts TF-IDF |
-| Asian | 0.60 | Underrepresented |
-| Indigenous | 0.55 | Sparse — treat with caution |
-| Caucasian | 0.52 | Counter-speech misclassified |
-
-19pp gap between best and worst group — highlights why per-group auditing is essential before any deployment.
-
-> Full error analysis, limitations table, and reproduction steps: [`reports/RESULTS.md`](reports/RESULTS.md)
-
----
+Details: [datasheet](docs/DATASHEET_wiki_talk.md) · [labelling guidelines](docs/LABELING_GUIDELINES.md).
 
 ## Quickstart
 
 ```bash
-# Clone and install
 git clone https://github.com/vyasprakhar-fraudsec/Identity-Abuse-Harassment-Analyzer
 cd Identity-Abuse-Harassment-Analyzer
 make setup
-
-# Run full baseline pipeline
-make all
-
-# Or run steps individually
-make download      # Fetch HateXplain from HuggingFace
-make preprocess    # Clean and split data
-make train         # Train baseline model
-make evaluate      # Generate confusion matrix, subgroup F1, predictions
-
-# Train and evaluate tuned model
-make train-tuned
-make evaluate-tuned
-
-# Code quality
-make lint          # flake8
-make format        # black + isort
+make data          # download HateXplain (pinned) + official splits
+make baseline      # TF-IDF + logistic regression, CPU, under a minute
+make report        # regenerate reports/RESULTS.md and this README's results
+make demo          # Gradio app at http://localhost:7860
+make test          # test suite
 ```
 
-See [`Makefile`](Makefile) for all available targets. All outputs are written to `outputs/`.
+GPU steps (transformer, Wikipedia collection, labelling) run end to end in [`notebooks/run_pipeline.ipynb`](notebooks/run_pipeline.ipynb) on a free Colab T4. `make help` lists every target.
 
----
+## Project structure
 
-## Documentation
-
-| Document | Contents |
-|---|---|
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Pipeline design, model choices, evaluation rationale |
-| [`reports/RESULTS.md`](reports/RESULTS.md) | Full metrics, confusion matrix, subgroup fairness table, error analysis |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute, code standards, responsible AI guidelines |
-
----
+```
+configs/          one YAML per experiment (data, tfidf_logreg, mlp_base, mlp_tuned, distilroberta, collect_wiki)
+src/
+  download_hatexplain.py   pinned download of the original release
+  preprocess.py            majority labels/targets, official split
+  train_baseline.py        TF-IDF + logistic regression or MLP
+  train_transformer.py     DistilRoBERTa fine-tuning
+  predict.py               one predict_proba interface for every model (+ explanations)
+  evaluate.py              metrics, confusion matrix, per-group fairness
+  collect_wiki.py          Wikipedia talk-page collector (collect / sample / rehydrate)
+  label_wiki.py            terminal labelling tool
+  evaluate_ood.py          scores on the new data + inter-annotator agreement
+  make_report.py           writes reports/RESULTS.md and the README results
+app/app.py        Gradio demo
+tests/            pytest suite (runs in CI with lint)
+reports/          generated results, figures and metrics (committed)
+docs/             architecture, datasheet, labelling guidelines
+```
 
 ## Limitations
 
-- **Ceiling on TF-IDF features**: Misses context, sarcasm, and dog-whistle language. Transformer fine-tuning is the clear next step.
-- **English-only**: HateXplain is English-centric; cross-lingual generalization is untested.
-- **Static dataset**: No online learning or drift detection. Real-world abuse patterns evolve rapidly.
-- **Subgroup data sparsity**: Groups with <20 test examples are excluded from subgroup analysis.
-- **No adversarial robustness**: Not tested against obfuscation (e.g., leetspeak, spacing tricks).
+- **English only**, and HateXplain's Twitter/Gab data from 2019–2020 is not representative of all platforms.
+- **Group-level numbers are noisy:** several groups have fewer than 100 test posts, and very few *normal* posts mention a group, so false-flag rates rest on small counts (shown in the report).
+- **The Wikipedia set is small** (≈500 items) and labelled by one to two people. It shows the direction and rough size of the change on new data, not a precise number.
+- **Not a moderation system:** no calibration, no human review loop, not tested against adversarial spelling tricks.
+
+## References
+
+- Mathew et al., *HateXplain: A Benchmark Dataset for Explainable Hate Speech Detection*, AAAI 2021. [arXiv:2012.10289](https://arxiv.org/abs/2012.10289)
+- Dixon et al., *Measuring and Mitigating Unintended Bias in Text Classification*, AIES 2018.
+- Gebru et al., *Datasheets for Datasets*, CACM 2021.
 
 ---
 
-## Next Steps
-
-- [ ] Fine-tune `bert-base-uncased` or `roberta-base` on HateXplain for a meaningful F1 lift
-- [ ] Add SHAP token-level explanations to visualize what drives predictions
-- [ ] Build a Gradio demo for interactive inference
-- [ ] Benchmark against Perspective API on the same test split
-- [ ] Experiment with focal loss to further address class imbalance
-- [ ] Explore multilingual extension with `xlm-roberta-base`
-
----
-
-## Tech Stack
-
-| Component | Tool |
-|-----------|------|
-| Language | Python 3.10+ |
-| ML framework | PyTorch 2.0+ |
-| Feature extraction | scikit-learn TfidfVectorizer |
-| Data | HuggingFace `datasets` |
-| Visualization | matplotlib, seaborn |
-| Config management | PyYAML |
-| CI | GitHub Actions (flake8, black, isort) |
-| Reproducibility | Fixed seed (42), config-driven |
-
----
-
-## Dataset
-
-**HateXplain** — Mathew et al., AAAI 2021
-- ~20,000 posts from Twitter and Gab
-- 3-class labels (hate / offensive / normal)
-- Target group annotations (10+ identity categories)
-- Human rationale spans for explainability
-
-[HuggingFace Dataset](https://huggingface.co/datasets/Hate-speech-CNERG/hatexplain) | [Paper (arXiv)](https://arxiv.org/abs/2012.10289)
-
----
-
-**Prakhar Vyas** | Aspiring ML Engineer — Trust & Safety / Applied NLP
-
-*Built with PyTorch · MIT License*
+**Prakhar Vyas** · ML for Trust & Safety · MIT License

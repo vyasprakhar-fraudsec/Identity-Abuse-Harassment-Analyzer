@@ -125,9 +125,10 @@ def findings(runs):
         if len(fpr):
             w = fpr.loc[fpr["normal_fpr"].idxmax()]
             out.append(
-                f"Highest false-flag rate: {fmt(w.normal_fpr * 100, 0)}% of normal posts that mention "
-                f"**{w.target_group}** were flagged as abusive (n={w.n_normal}). This is the "
-                "identity-term bias problem: the model learns the group name itself as a signal."
+                f"Highest false-flag rate: {fmt(w.normal_fpr * 100, 0)}% of normal posts about the "
+                f"**{w.target_group}** group were flagged as abusive (only {w.n_normal} such posts, "
+                "so treat as indicative). This is identity-term bias: the model learns the group "
+                "name itself as a signal of abuse."
             )
     return "\n".join(f"- {x}" for x in out)
 
@@ -226,6 +227,10 @@ def build(outputs="outputs", reports="reports", readme="README.md"):
     (reports / "RESULTS.md").write_text("\n".join(parts), encoding="utf-8")
 
     block = [START, "", main_table(runs), ""]
+    pending = [n for e, n in NAMES.items() if e not in runs]
+    if pending or not ood:
+        todo = ", ".join(pending + ([] if ood else ["Wikipedia evaluation"]))
+        block += [f"_Not run yet: {todo}. See `notebooks/run_pipeline.ipynb`._", ""]
     if ood:
         block += ["**On fresh data (Wikipedia talk pages, hand-labelled):**", "", ood, ""]
     block += [findings(runs), "", "Full report: [`reports/RESULTS.md`](reports/RESULTS.md)", "", END]

@@ -25,13 +25,17 @@ Content moderation models are usually judged by one accuracy number. This projec
 | Model | Macro F1 | Accuracy | Normal F1 | Offensive F1 | Hate F1 |
 |---|---|---|---|---|---|
 | TF-IDF + Logistic Regression | **0.648** | 0.659 | 0.711 | 0.509 | 0.724 |
+| TF-IDF + MLP (untuned) | **0.633** | 0.660 | 0.722 | 0.457 | 0.720 |
+| TF-IDF + MLP (dropout 0.3, class weights) | **0.641** | 0.653 | 0.708 | 0.501 | 0.713 |
+| DistilRoBERTa (fine-tuned) | **0.664** | 0.674 | 0.710 | 0.522 | 0.760 |
 
-_Not run yet: TF-IDF + MLP (untuned), TF-IDF + MLP (dropout 0.3, class weights), DistilRoBERTa (fine-tuned), Wikipedia evaluation. See `notebooks/run_pipeline.ipynb`._
+_Not run yet: Wikipedia evaluation. See `notebooks/run_pipeline.ipynb`._
 
-- Best model on the HateXplain test set: **TF-IDF + Logistic Regression**, macro F1 0.648.
-- Biggest confusion: 96 hate-speech posts predicted as offensive and 107 offensive posts predicted as hate speech.
-- Among groups with at least 50 test posts, macro F1 ranges from 0.452 (Refugee) to 0.565 (Women).
-- Highest false-flag rate: 77% of normal posts about the **Jewish** group were flagged as abusive (only 13 such posts, so treat as indicative). This is identity-term bias: the model learns the group name itself as a signal of abuse.
+- Best model on the HateXplain test set: **DistilRoBERTa (fine-tuned)**, macro F1 0.664.
+- That is +0.016 macro F1 over the logistic-regression baseline.
+- Biggest confusion: 70 hate-speech posts predicted as offensive and 137 offensive posts predicted as hate speech.
+- Among groups with at least 50 test posts, macro F1 ranges from 0.480 (African) to 0.635 (Refugee).
+- Highest false-flag rate: 85% of normal posts about the **Jewish** group were flagged as abusive (only 13 such posts, so treat as indicative). This is identity-term bias: the model learns the group name itself as a signal of abuse.
 
 Full report: [`reports/RESULTS.md`](reports/RESULTS.md)
 

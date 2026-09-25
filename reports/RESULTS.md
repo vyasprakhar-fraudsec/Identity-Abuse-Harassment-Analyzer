@@ -8,18 +8,19 @@ All numbers are on the **official HateXplain test split** (1924 posts, majority-
 
 | Model | Macro F1 | Accuracy | Normal F1 | Offensive F1 | Hate F1 |
 |---|---|---|---|---|---|
-| TF-IDF + Logistic Regression | **0.648** | 0.659 | 0.711 | 0.509 | 0.724 |
-| TF-IDF + MLP (untuned) | **0.633** | 0.660 | 0.722 | 0.457 | 0.720 |
-| TF-IDF + MLP (dropout 0.3, class weights) | **0.641** | 0.653 | 0.708 | 0.501 | 0.713 |
+| TF-IDF + Logistic Regression | 0.648 | 0.659 | 0.711 | 0.509 | 0.724 |
+| TF-IDF + MLP (untuned) | 0.633 | 0.660 | 0.722 | 0.457 | 0.720 |
+| TF-IDF + MLP (dropout 0.3, class weights) | 0.641 | 0.653 | 0.708 | 0.501 | 0.713 |
 | DistilRoBERTa (fine-tuned) | **0.664** | 0.674 | 0.710 | 0.522 | 0.760 |
 
 ## 2. Key findings
 
 - Best model on the HateXplain test set: **DistilRoBERTa (fine-tuned)**, macro F1 0.664.
 - That is +0.016 macro F1 over the logistic-regression baseline.
-- Biggest confusion: 70 hate-speech posts predicted as offensive and 137 offensive posts predicted as hate speech.
+- Most common errors: 187 normal posts predicted as offensive, and 137 offensive posts predicted as hate-speech.
 - Among groups with at least 50 test posts, macro F1 ranges from 0.480 (African) to 0.635 (Refugee).
 - Highest false-flag rate: 85% of normal posts about the **Jewish** group were flagged as abusive (only 13 such posts, so treat as indicative). This is identity-term bias: the model learns the group name itself as a signal of abuse.
+- **Accuracy vs. over-flagging:** The more accurate model catches more hate speech in 7 of 7 groups, but wrongly flags harmless posts more often in 5 of 7 groups. Group counts are small, so read this as a signal.
 
 ## 3. Confusion matrix: DistilRoBERTa (fine-tuned)
 
@@ -43,9 +44,23 @@ A post counts towards every group that at least 2 of 3 annotators said it target
 | Asian | 36 | 0.496 | 0.688 | 0.750 | 8 | – |
 | Hispanic | 35 | 0.345 | 0.958 | 0.909 | 2 | – |
 
+### Does the better model over-flag more?
+
+The more accurate model catches more hate speech in 7 of 7 groups, but wrongly flags harmless posts more often in 5 of 7 groups. Over-flagging harmless posts about a group silences that group, so an accuracy gain can come with a fairness cost. Counts are small (see the Normal posts column).
+
+| Target group | Normal posts | False-flag rate: TF-IDF + Logistic Regression | False-flag rate: DistilRoBERTa (fine-tuned) | Hate recall: TF-IDF + Logistic Regression | Hate recall: DistilRoBERTa (fine-tuned) |
+|---|---|---|---|---|---|
+| African | 21 | 0.762 | 0.762 | 0.841 | 0.881 |
+| Islam | 21 | 0.238 | 0.429 | 0.735 | 0.889 |
+| Jewish | 13 | 0.769 | 0.846 | 0.826 | 0.891 |
+| Homosexual | 26 | 0.192 | 0.346 | 0.534 | 0.726 |
+| Women | 21 | 0.238 | 0.381 | 0.583 | 0.694 |
+| Refugee | 32 | 0.312 | 0.375 | 0.333 | 0.611 |
+| Caucasian | 14 | 0.214 | 0.214 | 0.364 | 0.636 |
+
 ## 5. Fresh data: Wikipedia talk pages
 
-Not run yet: see `notebooks/run_pipeline.ipynb`, steps 5–7.
+The collection, sampling, labelling and scoring tools are built and tested (`src/collect_wiki.py`, `src/label_wiki.py`, `src/evaluate_ood.py`), but no labelled set has been published yet. Running notebook steps 5–7 fills this section in automatically.
 
 ## 6. Reproduce
 

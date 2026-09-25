@@ -1,0 +1,17 @@
+# Simplest honest baseline: TF-IDF + logistic regression.
+experiment: tfidf_logreg
+seed: 42
+data_config: configs/data.yaml
+
+features:
+  max_features: 30000
+  ngram_max: 2
+  min_df: 2
+
+model:
+  type: logreg
+  C: 2.0
+  class_weighting: true
+
+eval:
+  min_group_size: 30

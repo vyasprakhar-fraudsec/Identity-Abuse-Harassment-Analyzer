@@ -1,142 +1,135 @@
-import argparse
-import json
-import pickle
+"""Train a TF-IDF baseline: logistic regression (scikit-learn) or an MLP (PyTorch).
 
+Usage: python src/train_baseline.py --config configs/tfidf_logreg.yaml
+"""
+
+import argparse
+
+import joblib
 import numpy as np
 import pandas as pd
-import torch
-import torch.nn as nn
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import f1_score
 from sklearn.utils.class_weight import compute_class_weight
-from torch.utils.data import DataLoader, TensorDataset
 
-from utils import ensure_dirs, load_config, set_seed
-
-
-class MLPClassifier(nn.Module):
-    """
-    Simple baseline model:
-    TF-IDF features -> small hidden layer -> output logits
-    """
-    def __init__(self, input_dim, hidden_dim, output_dim, dropout):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, output_dim),
-        )
-
-    def forward(self, x):
-        return self.net(x)
+from utils import ensure_dirs, experiment_paths, load_config, save_json, set_seed
 
 
-def make_loader(X, y, batch_size, shuffle=False):
-    X_tensor = torch.tensor(X.toarray(), dtype=torch.float32)
-    y_tensor = torch.tensor(y.values, dtype=torch.long)
-    dataset = TensorDataset(X_tensor, y_tensor)
-    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+def load_splits(config):
+    processed = load_config(config["data_config"])["data"]["processed_dir"]
+    return (
+        pd.read_csv(f"{processed}/train.csv", keep_default_na=False),
+        pd.read_csv(f"{processed}/val.csv", keep_default_na=False),
+    )
 
 
-def run_epoch(model, loader, criterion, optimizer=None, device="cpu"):
-    is_train = optimizer is not None
-    model.train() if is_train else model.eval()
+def build_vectorizer(config):
+    feats = config["features"]
+    return TfidfVectorizer(
+        max_features=feats["max_features"],
+        ngram_range=(1, feats["ngram_max"]),
+        min_df=feats["min_df"],
+        sublinear_tf=True,
+        lowercase=True,
+    )
 
-    total_loss = 0.0
-    total_correct = 0
-    total_items = 0
 
-    with torch.set_grad_enabled(is_train):
-        for X_batch, y_batch in loader:
-            X_batch = X_batch.to(device)
-            y_batch = y_batch.to(device)
+def train_logreg(config, X_train, y_train):
+    m = config["model"]
+    clf = LogisticRegression(
+        C=m["C"],
+        max_iter=2000,
+        class_weight="balanced" if m["class_weighting"] else None,
+    )
+    return clf.fit(X_train, y_train)
 
-            logits = model(X_batch)
-            loss = criterion(logits, y_batch)
 
-            if is_train:
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+def train_mlp(config, X_train, y_train, X_val, y_val, model_dir):
+    import torch
+    import torch.nn as nn
 
-            preds = torch.argmax(logits, dim=1)
-            total_loss += loss.item() * y_batch.size(0)
-            total_correct += (preds == y_batch).sum().item()
-            total_items += y_batch.size(0)
+    from models import MLPClassifier
 
-    return total_loss / total_items, total_correct / total_items
+    m = config["model"]
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = MLPClassifier(X_train.shape[1], m["hidden_dim"], 3, m["dropout"]).to(device)
+
+    weight = None
+    if m["class_weighting"]:
+        w = compute_class_weight("balanced", classes=np.arange(3), y=y_train)
+        weight = torch.tensor(w, dtype=torch.float32, device=device)
+    criterion = nn.CrossEntropyLoss(weight=weight)
+    optimizer = torch.optim.Adam(model.parameters(), lr=m["learning_rate"])
+
+    def to_tensor(X_sparse):
+        # Densify one batch at a time; densifying the whole matrix needs ~2 GB.
+        return torch.tensor(X_sparse.toarray(), dtype=torch.float32, device=device)
+
+    def predict(X):
+        model.eval()
+        preds = []
+        with torch.no_grad():
+            for start in range(0, X.shape[0], 512):
+                preds.append(model(to_tensor(X[start : start + 512])).argmax(1).cpu().numpy())
+        return np.concatenate(preds)
+
+    best_f1, bad_epochs, history = -1.0, 0, []
+    y_train_t = torch.tensor(y_train, dtype=torch.long, device=device)
+    for epoch in range(1, m["epochs"] + 1):
+        model.train()
+        order = np.random.permutation(X_train.shape[0])
+        total = 0.0
+        for start in range(0, len(order), m["batch_size"]):
+            idx = order[start : start + m["batch_size"]]
+            loss = criterion(model(to_tensor(X_train[idx])), y_train_t[idx])
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            total += loss.item() * len(idx)
+        val_f1 = f1_score(y_val, predict(X_val), average="macro")
+        history.append({"epoch": epoch, "train_loss": total / len(order), "val_macro_f1": val_f1})
+        print(f"epoch {epoch:>2}  train_loss={total / len(order):.4f}  val_macro_f1={val_f1:.4f}")
+        if val_f1 > best_f1:
+            best_f1, bad_epochs = val_f1, 0
+            torch.save(model.state_dict(), model_dir / "mlp.pt")
+        else:
+            bad_epochs += 1
+            if bad_epochs >= m["patience"]:
+                print(f"early stopping (best val macro F1 {best_f1:.4f})")
+                break
+    save_json(history, model_dir / "history.json")
+    return best_f1
 
 
 def main(config_path):
     config = load_config(config_path)
-    set_seed(config["data"]["random_seed"])
+    set_seed(config["seed"])
+    paths = experiment_paths(config)
+    ensure_dirs([paths["model_dir"]])
 
-    ensure_dirs(["models"])
-
-    train_df = pd.read_csv(f"{config['data']['processed_dir']}/train.csv")
-    val_df = pd.read_csv(f"{config['data']['processed_dir']}/val.csv")
-
-    vectorizer = TfidfVectorizer(
-        max_features=config["training"]["max_features"],
-        ngram_range=(1, 2),
-        min_df=2,
-    )
-
+    train_df, val_df = load_splits(config)
+    vectorizer = build_vectorizer(config)
     X_train = vectorizer.fit_transform(train_df["text"])
     X_val = vectorizer.transform(val_df["text"])
+    y_train, y_val = train_df["label"].to_numpy(), val_df["label"].to_numpy()
+    joblib.dump(vectorizer, paths["model_dir"] / "vectorizer.joblib")
 
-    y_train = train_df["label"]
-    y_val = val_df["label"]
-
-    train_loader = make_loader(X_train, y_train, config["training"]["batch_size"], shuffle=True)
-    val_loader = make_loader(X_val, y_val, config["training"]["batch_size"], shuffle=False)
-
-    input_dim = X_train.shape[1]
-    output_dim = len(sorted(train_df["label"].unique()))
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    model = MLPClassifier(
-        input_dim=input_dim,
-        hidden_dim=config["training"]["hidden_dim"],
-        output_dim=output_dim,
-        dropout=config["training"]["dropout"],
-    ).to(device)
-
-    if config["training"]["class_weighting"]:
-        classes = np.array(sorted(y_train.unique()))
-        weights = compute_class_weight(class_weight="balanced", classes=classes, y=y_train.values)
-        class_weights = torch.tensor(weights, dtype=torch.float32).to(device)
-        criterion = nn.CrossEntropyLoss(weight=class_weights)
+    model_type = config["model"]["type"]
+    if model_type == "logreg":
+        clf = train_logreg(config, X_train, y_train)
+        joblib.dump(clf, paths["model_dir"] / "logreg.joblib")
+        val_f1 = f1_score(y_val, clf.predict(X_val), average="macro")
+    elif model_type == "mlp":
+        val_f1 = train_mlp(config, X_train, y_train, X_val, y_val, paths["model_dir"])
     else:
-        criterion = nn.CrossEntropyLoss()
+        raise ValueError(f"unknown model type: {model_type}")
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=config["training"]["learning_rate"])
-
-    best_val_loss = float("inf")
-
-    for epoch in range(config["training"]["epochs"]):
-        train_loss, train_acc = run_epoch(model, train_loader, criterion, optimizer, device)
-        val_loss, val_acc = run_epoch(model, val_loader, criterion, optimizer=None, device=device)
-
-        print(
-            f"Epoch {epoch+1}/{config['training']['epochs']} | "
-            f"train_loss={train_loss:.4f} train_acc={train_acc:.4f} | "
-            f"val_loss={val_loss:.4f} val_acc={val_acc:.4f}"
-        )
-
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            torch.save(model.state_dict(), config["paths"]["model_path"])
-
-    with open(config["paths"]["vectorizer_path"], "wb") as f:
-        pickle.dump(vectorizer, f)
-
-    print(f"Saved best model to {config['paths']['model_path']}")
-    print(f"Saved vectorizer to {config['paths']['vectorizer_path']}")
+    print(f"[{config['experiment']}] validation macro F1 = {val_f1:.4f}")
+    print(f"saved to {paths['model_dir']}/")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, required=True)
-    args = parser.parse_args()
-    main(args.config)
+    parser.add_argument("--config", required=True)
+    main(parser.parse_args().config)

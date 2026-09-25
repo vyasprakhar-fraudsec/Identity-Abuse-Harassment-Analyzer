@@ -1,0 +1,22 @@
+# Same as mlp_base with two changes: dropout 0.3 and class-weighted loss.
+experiment: mlp_tuned
+seed: 42
+data_config: configs/data.yaml
+
+features:
+  max_features: 30000
+  ngram_max: 2
+  min_df: 2
+
+model:
+  type: mlp
+  hidden_dim: 256
+  dropout: 0.3             # was 0.0
+  class_weighting: true    # was false
+  batch_size: 64
+  epochs: 12
+  learning_rate: 0.001
+  patience: 3
+
+eval:
+  min_group_size: 30

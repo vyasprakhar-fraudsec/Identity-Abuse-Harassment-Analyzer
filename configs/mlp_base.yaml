@@ -1,0 +1,22 @@
+# MLP on TF-IDF features, untuned: no dropout, no class weighting.
+experiment: mlp_base
+seed: 42
+data_config: configs/data.yaml
+
+features:
+  max_features: 30000
+  ngram_max: 2
+  min_df: 2
+
+model:
+  type: mlp
+  hidden_dim: 256
+  dropout: 0.0
+  class_weighting: false
+  batch_size: 64
+  epochs: 12
+  learning_rate: 0.001
+  patience: 3              # early stopping on validation macro F1
+
+eval:
+  min_group_size: 30

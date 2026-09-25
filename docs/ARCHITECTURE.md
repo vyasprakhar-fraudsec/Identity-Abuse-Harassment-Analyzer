@@ -1,135 +1,76 @@
-# Architecture & Design Decisions
+# Architecture & design decisions
 
-This document explains the technical design choices behind the Identity Abuse & Targeted Harassment Analyzer — written for engineers who want to understand the project at a deeper level than the README.
-
----
-
-## System Overview
+## Pipeline
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     Data Pipeline                        │
-│  HateXplain API → download → preprocess → train/val/test │
-└────────────────────────┬────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────┐
-│                   Feature Extraction                     │
-│     Raw text → TF-IDF Vectorizer (30k, 1-2 grams)       │
-└────────────────────────┬────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────┐
-│                     MLP Classifier                       │
-│  Linear(30000→256) → ReLU → Dropout → Linear(256→3)     │
-│  Loss: CrossEntropyLoss (optionally class-weighted)      │
-└────────────────────────┬────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────┐
-│                    Evaluation Suite                      │
-│  Classification report, Confusion matrix, Subgroup F1   │
-└─────────────────────────────────────────────────────────┘
+data/raw  (HateXplain dataset.json + post_id_divisions.json, pinned commit)
+   │  preprocess.py
+   ▼
+data/processed/{train,val,test}.csv   post_id, text, label, target_groups
+   │  train_baseline.py / train_transformer.py        (one YAML config per experiment)
+   ▼
+models/<experiment>/                  vectorizer + logreg | mlp.pt | HF checkpoint
+   │  predict.py  (same predict_proba for every model)
+   ├─► evaluate.py      → outputs/<experiment>/metrics, figures, predictions
+   ├─► evaluate_ood.py  → outputs/<experiment>/ood     (Wikipedia set)
+   └─► app/app.py       → Gradio demo
+outputs/ ──► make_report.py ──► reports/ (committed) + README results section
 ```
 
----
+## Decisions
 
-## Why TF-IDF + MLP as a Baseline?
+**Official split, original release.** The HuggingFace loader for HateXplain is a
+script that recent `datasets` versions refuse to run, and re-splitting the data
+makes results incomparable with the paper. The authors' GitHub release includes
+the official split, so we download it pinned to a commit.
 
-A common mistake in NLP portfolio projects is jumping straight to transformers. This project deliberately starts with TF-IDF + MLP for principled reasons:
+**Majority labels, undecided posts dropped.** Each post has 3 annotators. About
+900 posts have three different labels; like the paper, we drop them rather than
+pick one arbitrarily.
 
-1. **Speed**: Trains in seconds on CPU. Enables fast iteration on preprocessing, class weighting, and label design before investing in expensive GPU fine-tuning.
-2. **Interpretability**: TF-IDF weights are inspectable — you can directly examine which tokens drive predictions per class. Useful for debugging and for Trust & Safety audit trails.
-3. **Ceiling analysis**: A strong TF-IDF baseline tells you exactly how much a transformer buys you. Without a baseline, F1 gains from BERT are uncontextualized.
-4. **Signal**: Building an honest baseline shows ML maturity. It signals that you understand the tradeoff between speed, interpretability, and accuracy.
+**Target groups need 2 of 3 annotators.** One annotator's view of the target is
+noisy. A post can target several groups and counts towards each in the fairness
+metrics.
 
----
+**Three model tiers.**
+- *TF-IDF + logistic regression*: trains in seconds on CPU and is fully
+  interpretable (word contribution = TF-IDF value × class weight). It is the
+  floor any other model has to beat.
+- *TF-IDF + MLP*: tests whether a non-linear layer over the same features helps.
+  `mlp_base` is untuned and `mlp_tuned` changes exactly two settings (dropout,
+  class weights), so the comparison isolates their effect. Batches are
+  densified one at a time, because the full dense matrix would need ~2 GB.
+- *DistilRoBERTa*: context-aware, with the best expected accuracy. It is 40%
+  smaller than RoBERTa-base, so it fine-tunes in about 10 minutes on a free T4.
+  Class-weighted loss, linear warmup, fp16, and the checkpoint is chosen on
+  validation macro F1.
 
-## Data Pipeline Design
+**Model selection on validation macro F1, not loss.** The classes are
+imbalanced, and moderation cares about the minority classes, so every model is
+selected on macro F1.
 
-### `download_hatexplain.py`
-- Uses HuggingFace `datasets` library to pull directly from `Hate-speech-CNERG/hatexplain`.
-- Saves raw JSON splits to `data/raw/` for reproducibility and offline use.
-- No manual download step required; one command fetches and caches.
+**Fairness metrics beyond F1.** Per group we report *hate recall* (attacks that
+were missed) and the *false-flag rate on normal posts* (harmless posts about the
+group that got flagged). The second is the classic identity-term bias from
+Dixon et al. (2018). It is reported only when a group has ≥10 normal posts,
+because smaller counts are too noisy.
 
-### `preprocess.py`
-- **Majority label voting**: HateXplain has 3 annotators per post. A `Counter` extracts the majority label, discarding posts with no clear majority.
-- **Target group extraction**: Flattens nested target annotations into a single string (e.g., `"african,muslim"`) — used later in subgroup analysis.
-- **Stratified splitting**: `train_test_split` with `stratify=label` ensures class balance is maintained across train/val/test splits.
-- **Binary mode**: Optional merge of `hate + offensive → abusive` for simpler 2-class experiments (controlled by `label_mode` in config).
-- **Text cleaning** (`utils.clean_text`): lowercasing, URL removal, extra whitespace stripping. Intentionally minimal — heavy cleaning can mask signal for hate detection.
+**Out-of-distribution evaluation instead of more training data.** Adding a few
+hundred scraped examples would barely move training. Using them as an
+evaluation set answers a more useful question: how much does performance
+change on a new platform and a new time period? Sampling is stratified (model-
+flagged + random) so there are enough abusive examples to measure, while the
+random stratum gives an unbiased estimate. See `DATASHEET_wiki_talk.md`.
 
-### Why no stemming/lemmatization?
-Stemming can collapse morphological variants that carry different hateful intent (e.g., verb conjugations). We rely on unigram+bigram TF-IDF instead to capture phrase-level patterns.
+**Generated reports.** `make_report.py` writes every number in `README.md` and
+`reports/RESULTS.md` from `outputs/`, and copies the metrics and figures into
+`reports/` so they are versioned. Hand-typed results drift from the code;
+generated ones can't.
 
----
+## Testing
 
-## Model Architecture
-
-### MLPClassifier (`train_baseline.py`)
-
-```python
-nn.Sequential(
-    nn.Linear(input_dim, hidden_dim),   # 30000 → 256
-    nn.ReLU(),
-    nn.Dropout(dropout),                 # 0.0 (base) or 0.1 (tuned)
-    nn.Linear(hidden_dim, output_dim),  # 256 → 3
-)
-```
-
-**Design choices:**
-- **Single hidden layer**: Sufficient for linearly separable TF-IDF features. Multiple layers don't help when features are sparse bag-of-words.
-- **ReLU over Sigmoid/Tanh**: Better gradient flow for sparse inputs. Most TF-IDF vectors are near-zero; ReLU preserves these zero activations without distortion.
-- **Dropout before output**: Applied only to the final projection. Avoids over-regularizing the first projection from a sparse space.
-
-### Class Weighting
-
-HateXplain is imbalanced: offensive posts are overrepresented (~40%), normal (~30%), hate (~30%). Without weighting, the model learns to over-predict offensive.
-
-```python
-weights = compute_class_weight('balanced', classes=classes, y=y_train)
-criterion = nn.CrossEntropyLoss(weight=class_weights)
-```
-
-This scales the loss contribution inversely proportional to class frequency, giving hate and normal posts more gradient signal per batch.
-
-**Impact**: Hate recall improved ~3pp with weighting enabled — the most safety-relevant gain, since missed hate speech is the costlier false negative in production.
-
----
-
-## Evaluation Design
-
-### Why Macro-F1?
-Macro-F1 averages F1 equally across all 3 classes regardless of frequency. This penalizes models that boost accuracy by ignoring minority classes — which matters here because hate speech is the safety-critical minority.
-
-### Subgroup Analysis (`evaluate.py::evaluate_subgroups`)
-
-The subgroup evaluator:
-1. Joins predictions back to the test DataFrame (which includes `target_group`).
-2. Groups by `target_group` annotation.
-3. Filters out groups with <20 examples (too sparse for stable metrics).
-4. Computes macro F1 per group and sorts ascending (worst first).
-
-This surfaces **performance gaps by identity** — the core fairness audit needed before any deployment. A model with 0.63 macro-F1 overall but 0.52 on Indigenous posts has a systematic bias that aggregate metrics hide.
-
----
-
-## Config-Driven Design
-
-All hyperparameters live in YAML configs (`configs/`), not hardcoded in Python. This enables:
-- **Experiment tracking**: Each config file = one experiment. `base_config.yaml` vs `tuned_config.yaml` are directly diffable.
-- **No code changes for sweeps**: Change `dropout: 0.1 → 0.3` in YAML, rerun — no Python edits needed.
-- **Reproducibility**: Config files are committed alongside results. Anyone can reproduce any experiment exactly.
-
----
-
-## What's Next Architecturally
-
-| Step | Change | Expected Impact |
-|---|---|---|
-| BERT fine-tuning | Replace TF-IDF → BERT embeddings | +10-15pp macro F1 |
-| Focal loss | `alpha`-weighted loss for hard negatives | +2-4pp hate F1 |
-| SHAP explanations | Token-level attribution on MLP/BERT | Interpretability for audit |
-| Gradio API | Wrap `evaluate.py` inference in FastAPI | Deployable demo |
-| Adversarial tests | Typosquat + leet-speak test set | Robustness signal |
-
----
-
-*Architecture doc maintained by Prakhar Vyas*
+`tests/` covers labelling logic, split handling, anonymisation and diff parsing
+in the collector (including a check that usernames are never requested), the
+fairness metrics, and an end-to-end train → evaluate → report run on a tiny
+synthetic dataset. CI runs these together with flake8, black and isort. The
+torch paths (MLP, transformer) are exercised by the Colab notebook rather than CI.

@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements-dev.txt
+      - name: flake8
+        run: flake8 src tests app
+      - name: black
+        run: black --check src tests app
+      - name: isort
+        run: isort --check-only src tests app
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      # Tests cover the data pipeline, collector, metrics, scikit-learn model and
+      # report generator. Torch/transformers are not needed, which keeps CI fast.
+      - run: pip install numpy pandas scikit-learn pyyaml matplotlib seaborn requests lxml pytest
+      - run: pytest -q

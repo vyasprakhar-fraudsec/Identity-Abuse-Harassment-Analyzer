@@ -1,43 +1,60 @@
-.PHONY: help setup download preprocess train train-tuned evaluate evaluate-tuned lint format all clean
+.PHONY: help setup data baseline mlp transformer wiki-collect wiki-sample label ood report demo test lint format clean
 
-CONFIG_BASE = configs/base_config.yaml
-CONFIG_TUNED = configs/tuned_config.yaml
+PY = python
 
 help:  ## Show available commands
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-setup:  ## Install all dependencies
-	pip install -r requirements.txt
+setup:  ## Install dependencies
+	pip install -r requirements.txt -r requirements-dev.txt
 
-download:  ## Download HateXplain dataset from HuggingFace
-	python src/download_hatexplain.py
+data:  ## Download HateXplain (pinned) and build the official splits
+	$(PY) src/download_hatexplain.py
+	$(PY) src/preprocess.py
 
-preprocess:  ## Clean and split dataset into train/val/test CSVs
-	python src/preprocess.py --config $(CONFIG_BASE)
+baseline:  ## TF-IDF + logistic regression (CPU, seconds)
+	$(PY) src/train_baseline.py --config configs/tfidf_logreg.yaml
+	$(PY) src/evaluate.py --config configs/tfidf_logreg.yaml
 
-train:  ## Train baseline model (TF-IDF + MLP, no class weighting)
-	python src/train_baseline.py --config $(CONFIG_BASE)
+mlp:  ## TF-IDF + MLP, untuned and tuned
+	$(PY) src/train_baseline.py --config configs/mlp_base.yaml
+	$(PY) src/evaluate.py --config configs/mlp_base.yaml
+	$(PY) src/train_baseline.py --config configs/mlp_tuned.yaml
+	$(PY) src/evaluate.py --config configs/mlp_tuned.yaml
 
-train-tuned:  ## Train tuned model (dropout=0.1, class weighting enabled)
-	python src/train_baseline.py --config $(CONFIG_TUNED)
+transformer:  ## Fine-tune DistilRoBERTa (GPU recommended)
+	$(PY) src/train_transformer.py --config configs/distilroberta.yaml
+	$(PY) src/evaluate.py --config configs/distilroberta.yaml
 
-evaluate:  ## Evaluate baseline model (confusion matrix, subgroup F1, predictions)
-	python src/evaluate.py --config $(CONFIG_BASE)
+wiki-collect:  ## Collect recent Wikipedia talk-page comments (~25 min, rate-limited)
+	$(PY) src/collect_wiki.py collect
 
-evaluate-tuned:  ## Evaluate tuned model
-	python src/evaluate.py --config $(CONFIG_TUNED)
+wiki-sample:  ## Choose 500 comments to label
+	$(PY) src/collect_wiki.py sample
 
-lint:  ## Run flake8 linting
-	flake8 src/ --max-line-length=100 --ignore=E203,W503
+label:  ## Label comments in the terminal (ANNOTATOR=yourname)
+	$(PY) src/label_wiki.py --annotator $(ANNOTATOR)
 
-format:  ## Auto-format with black and isort
-	black src/
-	isort src/
+ood:  ## Score all trained models on the labelled Wikipedia set (GOLD=yourname)
+	$(PY) src/evaluate_ood.py --gold $(GOLD) --models $$(for c in tfidf_logreg mlp_base mlp_tuned distilroberta; do [ -d models/$$c ] && echo configs/$$c.yaml; done)
 
-all: download preprocess train evaluate  ## Run full baseline pipeline end-to-end
+report:  ## Regenerate reports/RESULTS.md and the README results from outputs/
+	$(PY) src/make_report.py
 
-all-tuned: download preprocess train-tuned evaluate-tuned  ## Run full tuned pipeline end-to-end
+demo:  ## Launch the Gradio demo locally
+	$(PY) app/app.py
 
-clean:  ## Remove generated outputs (models, outputs) - keeps raw data
+test:  ## Run the test suite
+	pytest -q
+
+lint:  ## flake8 + black + isort checks
+	flake8 src tests app
+	black --check src tests app
+	isort --check-only src tests app
+
+format:  ## Auto-format
+	black src tests app
+	isort src tests app
+
+clean:  ## Remove models and outputs (keeps data and reports)
 	rm -rf models/ outputs/
-	@echo "Cleaned models/ and outputs/ directories"

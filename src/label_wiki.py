@@ -39,8 +39,13 @@ def main(args):
             key = input("> ").strip().lower()
         if key == "q":
             break
-        new = {"rev_id": row.rev_id, "old_rev_id": row.old_rev_id, "stratum": row.stratum,
-               "label": KEYS[key], "annotator": args.annotator}
+        new = {
+            "rev_id": row.rev_id,
+            "old_rev_id": row.old_rev_id,
+            "stratum": row.stratum,
+            "label": KEYS[key],
+            "annotator": args.annotator,
+        }
         done = pd.concat([done, pd.DataFrame([new])], ignore_index=True)
         done.to_csv(out, index=False)
     print(f"\nsaved {len(done)} labels -> {out}")

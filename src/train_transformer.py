@@ -78,13 +78,9 @@ def main(config_path):
         weight = torch.tensor(w, dtype=torch.float32, device=device)
     loss_fn = torch.nn.CrossEntropyLoss(weight=weight)
 
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=m["learning_rate"], weight_decay=m["weight_decay"]
-    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=m["learning_rate"], weight_decay=m["weight_decay"])
     total_steps = len(train_loader) * m["epochs"]
-    scheduler = get_linear_schedule_with_warmup(
-        optimizer, int(m["warmup_ratio"] * total_steps), total_steps
-    )
+    scheduler = get_linear_schedule_with_warmup(optimizer, int(m["warmup_ratio"] * total_steps), total_steps)
     use_amp = device == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 

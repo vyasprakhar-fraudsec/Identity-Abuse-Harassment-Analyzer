@@ -36,7 +36,7 @@ def summarize(y_true, y_pred):
     return {
         "n": int(len(y_true)),
         "accuracy": float(accuracy_score(y_true, y_pred)),
-        "macro_f1": float(f1_score(y_true, y_pred, labels=[0, 1, 2], average="macro")),
+        "macro_f1": float(f1_score(y_true, y_pred, labels=[0, 1, 2], average="macro", zero_division=0)),
         "per_class": {
             label: {k: float(report[label][k]) for k in ["precision", "recall", "f1-score"]}
             for label in LABELS
@@ -47,7 +47,9 @@ def summarize(y_true, y_pred):
 def subgroup_metrics(df, y_true, y_pred, min_group_size=30):
     """Metrics for each target group a post belongs to.
 
-    macro_f1        3-class macro F1 within the group
+    macro_f1        macro F1 over the classes that actually occur in the group
+                    (most group posts are abusive, so averaging in an absent
+                    "normal" class as 0 would make every group look bad)
     abusive_recall  share of truly abusive posts (offensive or hate) that were flagged
     hate_recall     share of true hate speech predicted as hate speech
     normal_fpr      share of normal posts about this group wrongly flagged as abusive
@@ -71,7 +73,13 @@ def subgroup_metrics(df, y_true, y_pred, min_group_size=30):
             {
                 "target_group": group,
                 "n": len(g),
-                "macro_f1": f1_score(g["y_true"], g["y_pred"], labels=[0, 1, 2], average="macro"),
+                "macro_f1": f1_score(
+                    g["y_true"],
+                    g["y_pred"],
+                    labels=sorted(g["y_true"].unique()),
+                    average="macro",
+                    zero_division=0,
+                ),
                 "abusive_recall": pred_ab[is_ab].mean() if is_ab.any() else np.nan,
                 "hate_recall": (g["y_pred"][is_hate] == hate).mean() if is_hate.any() else np.nan,
                 "n_normal": int(is_normal.sum()),

@@ -234,7 +234,9 @@ def rehydrate(config):
     for rec in ids.itertuples():
         text = comment_from_diff(client.diff(rec.old_rev_id, rec.rev_id), 1, 10**6)
         if text:  # revisions deleted since collection are skipped, as they should be
-            rows.append({"rev_id": rec.rev_id, "old_rev_id": rec.old_rev_id, "stratum": rec.stratum, "text": text})
+            rows.append(
+                {"rev_id": rec.rev_id, "old_rev_id": rec.old_rev_id, "stratum": rec.stratum, "text": text}
+            )
     pd.DataFrame(rows).to_csv(config["to_label_path"], index=False)
     print(f"rehydrated {len(rows)}/{len(ids)} items -> {config['to_label_path']}")
 

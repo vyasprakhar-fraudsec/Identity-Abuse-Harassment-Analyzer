@@ -1,7 +1,7 @@
 """One interface for every trained model, used by evaluation, OOD evaluation and the demo.
 
-    predictor = load_predictor("configs/tfidf_logreg.yaml")
-    probs = predictor.predict_proba(["some text"])   # shape (n, 3), order = label_maps.LABELS
+predictor = load_predictor("configs/tfidf_logreg.yaml")
+probs = predictor.predict_proba(["some text"])   # shape (n, 3), order = label_maps.LABELS
 """
 
 import numpy as np

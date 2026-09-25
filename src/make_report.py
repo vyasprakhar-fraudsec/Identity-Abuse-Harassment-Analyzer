@@ -18,6 +18,7 @@ NAMES = {
     "mlp_tuned": "TF-IDF + MLP (dropout 0.3, class weights)",
     "distilroberta": "DistilRoBERTa (fine-tuned)",
 }
+LABEL_NAMES = ["normal", "offensive", "hate-speech"]
 START, END = "<!-- RESULTS:START -->", "<!-- RESULTS:END -->"
 MIN_NORMAL_FOR_FPR = 10
 
@@ -51,10 +52,12 @@ def main_table(runs):
         "| Model | Macro F1 | Accuracy | Normal F1 | Offensive F1 | Hate F1 |",
         "|---|---|---|---|---|---|",
     ]
+    best = best_run(runs)
     for exp, r in runs.items():
         s, pc = r["summary"], r["summary"]["per_class"]
+        f1 = f"**{fmt(s['macro_f1'])}**" if exp == best else fmt(s["macro_f1"])
         lines.append(
-            f"| {name(exp)} | **{fmt(s['macro_f1'])}** | {fmt(s['accuracy'])} | "
+            f"| {name(exp)} | {f1} | {fmt(s['accuracy'])} | "
             f"{fmt(pc['normal']['f1-score'])} | {fmt(pc['offensive']['f1-score'])} | "
             f"{fmt(pc['hatespeech']['f1-score'])} |"
         )
@@ -108,9 +111,13 @@ def findings(runs):
         out.append(f"That is {gain:+.3f} macro F1 over the logistic-regression baseline.")
     cm = s.get("confusion_matrix")
     if cm:
+        errors = sorted(
+            ((cm[t][p], LABEL_NAMES[t], LABEL_NAMES[p]) for t in range(3) for p in range(3) if t != p),
+            reverse=True,
+        )
+        (n1, t1, p1), (n2, t2, p2) = errors[:2]
         out.append(
-            f"Biggest confusion: {cm[2][1]} hate-speech posts predicted as offensive and "
-            f"{cm[1][2]} offensive posts predicted as hate speech."
+            f"Most common errors: {n1} {t1} posts predicted as {p1}, and {n2} {t2} posts predicted as {p2}."
         )
     sub = runs[best]["subgroups"]
     if sub is not None and len(sub):
@@ -130,7 +137,43 @@ def findings(runs):
                 "so treat as indicative). This is identity-term bias: the model learns the group "
                 "name itself as a signal of abuse."
             )
+    bias = bias_comparison(runs)
+    if bias:
+        out.append(
+            f"**Accuracy vs. over-flagging:** {bias[0]} Group counts are small, so read this as a signal."
+        )
     return "\n".join(f"- {x}" for x in out)
+
+
+def bias_comparison(runs, baseline="tfidf_logreg"):
+    """False-flag rate on normal posts per group: baseline vs best model."""
+    best = best_run(runs)
+    if best == baseline or baseline not in runs:
+        return None
+    a, b = runs[baseline]["subgroups"], runs[best]["subgroups"]
+    if a is None or b is None:
+        return None
+    m = a.merge(b, on="target_group", suffixes=("_base", "_best"))
+    m = m[m["n_normal_best"] >= MIN_NORMAL_FOR_FPR].sort_values("n_best", ascending=False)
+    if m.empty:
+        return None
+    rows = [
+        f"| Target group | Normal posts | False-flag rate: {name(baseline)} | False-flag rate: {name(best)} "
+        f"| Hate recall: {name(baseline)} | Hate recall: {name(best)} |",
+        "|---|---|---|---|---|---|",
+    ]
+    for r in m.itertuples():
+        rows.append(
+            f"| {r.target_group} | {r.n_normal_best} | {fmt(r.normal_fpr_base)} | {fmt(r.normal_fpr_best)} "
+            f"| {fmt(r.hate_recall_base)} | {fmt(r.hate_recall_best)} |"
+        )
+    worse = int((m["normal_fpr_best"] > m["normal_fpr_base"]).sum())
+    better_recall = int((m["hate_recall_best"] > m["hate_recall_base"]).sum())
+    summary = (
+        f"The more accurate model catches more hate speech in {better_recall} of {len(m)} groups, "
+        f"but wrongly flags harmless posts more often in {worse} of {len(m)} groups."
+    )
+    return summary, "\n".join(rows)
 
 
 def copy_artifacts(runs, reports):
@@ -194,6 +237,18 @@ def build(outputs="outputs", reports="reports", readme="README.md"):
             subgroup_table(runs[best]["subgroups"]),
             "",
         ]
+        bias = bias_comparison(runs)
+        if bias:
+            parts += [
+                "### Does the better model over-flag more?",
+                "",
+                bias[0]
+                + " Over-flagging harmless posts about a group silences that group, so an accuracy gain "
+                "can come with a fairness cost. Counts are small (see the Normal posts column).",
+                "",
+                bias[1],
+                "",
+            ]
     parts += ["## 5. Fresh data: Wikipedia talk pages", ""]
     if ood:
         first = next(r["ood"] for r in runs.values() if r["ood"])
@@ -211,7 +266,11 @@ def build(outputs="outputs", reports="reports", readme="README.md"):
                 f"{a['cohen_kappa']:.2f}, raw agreement {a['raw_agreement']:.0%}."
             )
     else:
-        parts.append("Not run yet: see `notebooks/run_pipeline.ipynb`, steps 5–7.")
+        parts.append(
+            "The collection, sampling, labelling and scoring tools are built and tested "
+            "(`src/collect_wiki.py`, `src/label_wiki.py`, `src/evaluate_ood.py`), but no labelled set "
+            "has been published yet. Running notebook steps 5–7 fills this section in automatically."
+        )
     parts += [
         "",
         "## 6. Reproduce",
@@ -228,9 +287,8 @@ def build(outputs="outputs", reports="reports", readme="README.md"):
 
     block = [START, "", main_table(runs), ""]
     pending = [n for e, n in NAMES.items() if e not in runs]
-    if pending or not ood:
-        todo = ", ".join(pending + ([] if ood else ["Wikipedia evaluation"]))
-        block += [f"_Not run yet: {todo}. See `notebooks/run_pipeline.ipynb`._", ""]
+    if pending:
+        block += [f"_Not run yet: {', '.join(pending)}. See `notebooks/run_pipeline.ipynb`._", ""]
     if ood:
         block += ["**On fresh data (Wikipedia talk pages, hand-labelled):**", "", ood, ""]
     block += [findings(runs), "", "Full report: [`reports/RESULTS.md`](reports/RESULTS.md)", "", END]
